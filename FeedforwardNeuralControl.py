@@ -170,7 +170,7 @@ x0 = tuple([(float(np.random.rand(1))*(InitializationBounds[0][1]-Initialization
              float(np.random.rand(1))*(InitializationBounds[1][1]-InitializationBounds[1][0]) + InitializationBounds[1][0]) for k in range(NumInitializations)])
 
 # Target output
-yTarget = tuple([(k,) for k in np.linspace(-0.2, -0.33, 1)])
+yTarget = tuple([(k,) for k in np.linspace(-0.25, -0.33, 1)])
 
 # Error weighting
 ErrorW = (1.,)

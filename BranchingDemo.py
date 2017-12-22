@@ -11,7 +11,6 @@ from matplotlib import pyplot as plt
 
 
 #%% Functions
-
 def MyFunction(w, p_branch):
     
     if w < p_branch:
@@ -23,7 +22,6 @@ def MyFunction(w, p_branch):
 
 
 #%% Calculations
-    
 # Point at which the function moves from a parabola to a sine wave
 p_branch = 1.5
 
@@ -45,7 +43,6 @@ for k,dumw in enumerate(w):
 
 
 #%% Plot results
-    
 fig = plt.figure()
 plt.plot(w, f, label='Output')
 plt.plot(w, fdot, label='First derivative')
