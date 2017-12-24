@@ -11,7 +11,7 @@ from autograd.misc.optimizers import adam
 from matplotlib import pyplot as plt
 
 #%%
-def InitParams(LayerSizes, rs=np.random.RandomState(0)):
+def InitParams(LayerSizes, rs=np.random):
     """Build a list of (weights, biases) tuples,
        one for each layer in the net. Uses Xavier initialization"""
     return tuple([(np.sqrt(2/(m+n)) * rs.randn(n,m),   # weight matrix
@@ -31,9 +31,11 @@ def FeedforwardNet(Params, x):
 
     return x
 
-def StateIterationFun(Sys, x, y, yTarget, NetParams):
+def StateIterationFun(Sys, x, y, NeuralInput, yTarget, NetParams):
       
-    NeuralInput = np.array([yTarget[0]-y[0], y[0]])
+    NeuralInput = np.concatenate((np.array([yTarget[0]-y[0], y[0]]), np.array([yTarget[0]-y[0], y[0]]) - NeuralInput[0:2]))
+    
+#    NeuralInput = np.array([yTarget[0]-y[0]])
     
     # Obtain control signal from neural net
     ControlSignal = FeedforwardNet(NetParams,NeuralInput)
@@ -42,21 +44,22 @@ def StateIterationFun(Sys, x, y, yTarget, NetParams):
     # Output calculation
     y = np.array([x[1]/x[0]])
     
-    return x,y
+    return x,y,NeuralInput
 
 def SimulationFun(Sys, NetParams, x0, yTarget, T, ErrorW, Bounds):
     
     N =  int(T/Sys['dt']) + 1
     
-    x          = np.concatenate((np.array(x0), np.zeros((Sys['delay']*len(x0)))))
-    y          = np.array([x[1]/x[0]])
-    yTargetUse = np.array(yTarget)
+    x           = np.concatenate((np.array(x0), np.zeros((Sys['delay']*len(x0)))))
+    y           = np.array([x[1]/x[0]])
+    NeuralInput = np.zeros((LayerSizes[0]))
+    yTargetUse  = np.array(yTarget)
     
     ErrorW = np.array(ErrorW)
     
     cost = 0.
     for k in range(N):
-        x,y  = StateIterationFun(Sys, x, y, yTargetUse, NetParams)
+        x,y,NeuralInput  = StateIterationFun(Sys, x, y, NeuralInput, yTargetUse, NetParams)
         cost = cost + GetCost(y, yTargetUse, ErrorW)
 
         if not (Bounds[0][0] < x[0] < Bounds[0][1] and Bounds[1][0] < x[1] < Bounds[1][1]):
@@ -69,9 +72,10 @@ def SimulationSaveAllFun(Sys, NetParams, x0, yTarget, T, ErrorW):
     
     N =  int(T/Sys['dt']) + 1
     
-    x          = np.concatenate((np.array(x0), np.zeros((Sys['delay']*len(x0)))))
-    y          = np.array([x[1]/x[0]])
-    yTargetUse = np.array(yTarget)
+    x           = np.concatenate((np.array(x0), np.zeros((Sys['delay']*len(x0)))))
+    y           = np.array([x[1]/x[0]])
+    NeuralInput = np.zeros((LayerSizes[0]))
+    yTargetUse  = np.array(yTarget)
     
     ErrorW = np.array(ErrorW)
     
@@ -85,7 +89,7 @@ def SimulationSaveAllFun(Sys, NetParams, x0, yTarget, T, ErrorW):
     
     cost = 0.
     for k in range(1,N):
-        x,y  = StateIterationFun(Sys, x, y, yTargetUse, NetParams)
+        x,y,NeuralInput  = StateIterationFun(Sys, x, y, NeuralInput, yTargetUse, NetParams)
         cost = cost + GetCost(y, yTargetUse, ErrorW)
         
         xTotal[k,:]  = x
@@ -107,7 +111,7 @@ def ObjectiveFunWrap(NetParams, k):
             _,DumTotalCost = SimulationFun(Sys, NetParams, x0Use, yTargetUse, T, ErrorW, Bounds)
             TotalCost = TotalCost + DumTotalCost
             Count = Count + 1
-    return TotalCost/Count
+    return (TotalCost/Count)
 
 def PrintPerf(Params, iter, _):
     if iter == 0:
@@ -155,47 +159,45 @@ def InitiateDelayedinputSystem(Sys, NumDelay):
 
 
 #%% INITIALIZATION
-# Neural net layer sizes
-LayerSizes = (2,30,1)
+# Number of neurons per layer
+LayerSizes = (4,30,1)
 
-# Initial state
-#PositionStartVector = (1, 10, 50, 100)
-#x0 = tuple([(k, 0) for k in PositionStartVector])
+# Randomly define a certain amount of starting states between certain bounds
+NumInitializationsX = 1
+InitializationBoundsX = ((10., 10.),(-0., 0.))
 
+x0 = tuple([(float(np.random.rand(1))*(InitializationBoundsX[0][1]-InitializationBoundsX[0][0]) + InitializationBoundsX[0][0], 
+             float(np.random.rand(1))*(InitializationBoundsX[1][1]-InitializationBoundsX[1][0]) + InitializationBoundsX[1][0]) for k in range(NumInitializationsX)])
 
-NumInitializations = 1
-InitializationBounds = ((10., 10.),(-0, 0))
-
-x0 = tuple([(float(np.random.rand(1))*(InitializationBounds[0][1]-InitializationBounds[0][0]) + InitializationBounds[0][0], 
-             float(np.random.rand(1))*(InitializationBounds[1][1]-InitializationBounds[1][0]) + InitializationBounds[1][0]) for k in range(NumInitializations)])
-
-# Target output
-yTarget = tuple([(k,) for k in np.linspace(-0.25, -0.33, 1)])
+# Define a certain number of target outputs
+yTarget = tuple([(k,) for k in np.linspace(-0.1, -0.33, 3)])
 
 # Error weighting
 ErrorW = (1.,)
 
-# State bounds
-Bounds = ((0.05, 1000),(-np.inf, np.inf))
+# State bounds, when out of bounds the simulation stops
+Bounds = ((0.05, 100),(-np.inf, np.inf))
 
 # Time parameters
 dt = 0.1
 T  = 100
 
 # Initialize discrete state-space system (double integrator)
-NumDelay = 0
-
 A = np.array([[1., dt],[0., 1.]])
 B = np.array([[0.5*dt**2],[dt]])
 C = np.eye(2)
 D = np.array([[0.],[0.]])
 
-SysRaw = {'A':A, 'B':B, 'C':C, 'D':D, 'dt':dt, 'delay':NumDelay}
+SysRaw = {'A':A, 'B':B, 'C':C, 'D':D, 'dt':dt, 'delay':0}
 
+# Define equivalent state-space system with delayed input
+# Number of samples delay
+NumDelay = 5
+# SS system
 Sys = InitiateDelayedinputSystem(SysRaw, NumDelay)
 
-
-# %%Initialize neural net parameters
+# %%
+# Initialize neural net parameters
 ParamsInitial = InitParams(LayerSizes)
 
 # Flatten parameter tuple
@@ -206,18 +208,18 @@ ObjectiveGrad = grad(ObjectiveFunWrap,argnum=0)
 
 
 #%% Train neural net
-
+# Adam optimizer
 # The optimizers provided can optimize lists, tuples, or dicts of parameters.
 #ParamsOpt = adam(CostGrad, Params, step_size=StepSize, num_iters=NumEpochs, callback=PrintPerf)
 ParamsOpt = adam(ObjectiveGrad, ParamsInitial, callback=PrintPerf, num_iters=100,
-         step_size=0.001, b1=0.9, b2=0.999, eps=10**-8)
+         step_size=0.0005, b1=0.9, b2=0.99, eps=10**-8)
 
 
 #%%
 
 x0      = (10., 0.)
-yTarget = (-0.2,)
-T       = 100.
+yTarget = (-0.1,)
+T       = 300.
 
 SpareRoomFactor = 0.05
 
@@ -242,17 +244,20 @@ plt.xlim(GetZoomLimits(tPlot[0:IdxCollision+1], SpareRoomFactor))
 plt.ylim(GetZoomLimits(xPlot[0:IdxCollision+1,:], SpareRoomFactor))
 plt.grid()
 plt.title('Simulation output')
-plt.xlabel('Time [s]')
+#plt.xlabel('Time [s]')
 plt.ylabel('Simulation output')
 plt.legend()
-
+#plt.xlim((0, 35))
 plt.show()
 
 plt.subplot(2,1,2)
 plt.plot(tPlot, divPlot, label='Divergence')
 plt.xlim(GetZoomLimits(tPlot[0:IdxCollision+1], SpareRoomFactor))
-plt.ylim(GetZoomLimits(divPlot[0:IdxCollision+1-10], SpareRoomFactor))
-
+plt.ylim((-0.05, 0.05))
+#plt.xlim((0, 35))
+#plt.ylim((0, 35))
+#plt.ylim(GetZoomLimits(divPlot[0:IdxCollision+1-10], SpareRoomFactor))
+plt.xlabel('Time [s]')
 plt.legend()
 plt.grid()
 
