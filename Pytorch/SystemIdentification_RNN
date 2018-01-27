@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Jan  5 13:00:35 2018
+
+@author: lenard
+
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+
+import torch
+from torch.autograd import Variable
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+
+import matplotlib.pyplot as plt
+
+import numpy as np
+
+import control as ctrl
+
+#%%
+def weight_init(m):
+    classname = m.__class__.__name__
+    print(classname)
+    if classname.find('Linear') != -1:
+        m.weight.data.normal_(0.0, 0.001)
+#        m.bias.data.fill_(0)
+        
+    elif classname.find('RNN') != -1:
+        m.weight_hh_l0.data.normal_(0.0, 0.001)
+        m.weight_ih_l0.data.normal_(0.0, 0.001)
+        m.bias_hh_l0.data.fill_(0)
+        m.bias_ih_l0.data.fill_(0)
+
+        
+    return m
+
+def ss_init(dt,delay=0,method='tustin'):
+    
+    # Continuous state-space matrices
+    A_cont = np.array([[0., 1.],[0., 0]])
+    B_cont = np.array([[0.],[1.]])
+    C_cont = np.array([[1., 0.],[0., 1.]])
+    D_cont = np.array([[0.],[0.]])
+    
+    numState = A_cont.shape[0]
+    
+    # Continuous system
+    SS_cont = ctrl.ss(A_cont, B_cont, C_cont, D_cont)
+    # Discrete system
+    SS_disc_nodelay = ctrl.sample_system(SS_cont, dt, method=method)
+    
+    if delay == 0: return SS_disc_nodelay
+    
+    # Initialize discrete delayed state-space matrices
+    dumA = np.zeros((numState*(delay+1), numState*(delay+1)))
+    dumB = np.zeros((numState*(delay+1), 1))
+    dumC = np.zeros((SS_disc_nodelay.C.shape[0],numState*(delay+1)))
+    dumD = np.zeros((SS_disc_nodelay.D.shape[0],SS_disc_nodelay.B.shape[1]))
+    dumvec = np.ones((numState*delay))
+    
+    # Populate ss-matrices such that the input is delayed by #delay samples
+    dumA[0:numState, 0:numState] = SS_disc_nodelay.A
+    for k in range(numState):
+        dumA[k, numState+k*delay] = 1.
+        dumB[numState-1+(k+1)*delay, 0] = SS_disc_nodelay.B[k]
+        dumvec[(k+1)*delay-1] = 0.
+        
+    dumvec = dumvec[:-1]
+    
+    dumA[numState:,numState:] = np.diag(dumvec, k=1)
+    
+    dumC[:SS_disc_nodelay.C.shape[0],:SS_disc_nodelay.C.shape[1]] = SS_disc_nodelay.C
+    
+    dumD[:SS_disc_nodelay.D.shape[0],:SS_disc_nodelay.D.shape[1]] = SS_disc_nodelay.D
+        
+    
+    # Create delayed discrete state-space system
+    SS_disc_delay = ctrl.ss(dumA, dumB, dumC, dumD, dt)
+    
+    return SS_disc_delay
+    
+
+class Simulation(nn.Module):
+
+    def __init__(self):
+        super(Simulation,self).__init__()
+ 
+        # RNN
+        self.rnn = nn.RNN(input_size=1, hidden_size=5, num_layers=2, nonlinearity='tanh', bias=True, dropout=0.0)
+        # an affine operation: y = Wx + b
+        self.fc2 = nn.Linear(5,2)
+        
+    
+    def forward(self, inputs):
+        
+        rnn_state = None
+        outputs,_ = self.rnn(inputs, rnn_state)
+#        
+#        outputs   = self.fc1(inputs)
+#        outputs   = F.tanh(outputs)
+        outputs   = self.fc2(outputs)
+        
+        
+        return outputs
+        
+    def num_flat_features(self, x):
+        size = x.size()[1:]  # all dimensions except the batch dimension
+        num_features = 1
+        for s in size:
+            num_features *= s
+        return num_features
+
+#%%
+delay   = 0
+dt      = 0.1
+T       = 20.
+N_steps = int(T/dt) + 1
+TimeVector  = np.arange(0., T+dt, dt)
+
+dmethod = 'tustin'
+
+# Get state-space model
+StateSpaceSystem = ss_init(dt, delay, dmethod)
+    
+#%%
+# Initialize net
+net = Simulation()
+# Initialize weighdt
+net.apply(weight_init)
+
+print(net)
+
+#%%
+# Input = (batchsize, input..)
+NumTimesteps = TimeVector.shape[0]
+NumInputs    = 1
+NumDelayedElements = (0,)
+NumBatches   = 20
+NumOutputs   = 2
+#Input        = Variable(torch.rand(NumTimesteps, NumBatches, NumInputs).float()-0.5)
+#Input        = Variable(torch.from_numpy(0.1*np.sin(5*np.repeat(TimeVector.reshape(-1,1),NumBatches,axis=1))).float()).view(NumTimesteps,NumBatches,NumInputs)
+
+Input = np.zeros((NumTimesteps, NumBatches, int((np.array(NumDelayedElements)+1).sum())))
+for i in range(NumInputs):
+    for j in range(NumBatches):
+        dumA = np.random.rand(1) * 1
+        dumF = 0.25 + 0.25 * np.random.rand(1) * 2 * np.pi
+        dumP = np.random.rand(1) * 2 * np.pi
+        duminput = dumA * np.sin(TimeVector*dumF + dumP) + np.random.randn(TimeVector.shape[0])*0.25
+        
+#        duminput = (np.random.rand(TimeVector.shape[0])-0.5)
+        
+        duminput_delay = np.zeros((duminput.shape[0], NumDelayedElements[i]+1))
+        for k in range(NumDelayedElements[i]+1):
+            duminput_delay[k:,k] = np.roll(duminput, k)[k:]
+        
+        idxbounds = (int((np.array(NumDelayedElements[:i])+1).sum()), int((np.array(NumDelayedElements[:i+1])+1).sum()))
+        
+        Input[:,j,idxbounds[0]:idxbounds[1]] = duminput_delay
+        
+        
+Input = Variable(torch.from_numpy(Input).float(), requires_grad=False)
+
+Target = np.zeros((NumTimesteps, NumBatches, NumOutputs))
+k = 0
+while k < NumBatches :
+    dumX0 = (np.random.rand(2)-np.array([0., 0.5]))*np.array([0., 0])
+    dumtarget,_,_ = ctrl.lsim(StateSpaceSystem, Input[:,k,0].data.numpy(), TimeVector, X0=dumX0)
+    
+    Target[:,k,0] = dumtarget[0,:]
+    Target[:,k,1] = dumtarget[1,:]
+    k+= 1
+    
+    
+Target        = Variable(torch.from_numpy(Target).float(), requires_grad=False)
+OutputStart   = net(Input)
+
+
+#%%
+criterion = nn.MSELoss()
+
+optimizer = optim.Adam(net.parameters(), lr=0.0005, betas=(0.9, 0.999), eps=1e-08, weight_decay=0)
+
+
+#%%
+NumEpochs = 100000
+
+NumBatchUse = NumBatches
+
+NumHidden = 0
+
+for i in range(NumEpochs):
+    
+    # Zero the gradient to disconnect from previous epoch
+    optimizer.zero_grad()
+    
+    # Pick batches
+    IdxBatch = np.random.randint(low=0, high=NumBatches-1, size=NumBatches)
+    
+    # Forward
+    Output = net(Input[:,IdxBatch,:])
+    loss   = criterion(Output[NumHidden:,:,:], Target[NumHidden:,IdxBatch,:])
+    
+    # Backward
+    loss.backward()
+    
+    # Optimize
+    optimizer.step()
+
+    # print statistics
+    if i % 10 == 9:    # print every 10 mini-batches
+        print('[%5d] loss: %.3f' %
+              (i + 1, loss.data.numpy()))
+
+print('Finished Training')
+
+Output = net(Input)
+
+
+#%%
+for k in range(NumBatches):
+
+    fig = plt.figure()
+    plt.plot(TimeVector, Target[:,k,0].data.numpy(), label='Target', color='k' )
+    plt.plot(TimeVector, OutputStart[:,k,0].data.numpy(), label='Before training' )
+    plt.plot(TimeVector, Output[:,k,0].data.numpy(), label='After training' )
+    plt.legend()
+    plt.grid()
+    plt.show()
+ 
+#%%
+#T, yout = ctrl.impulse_response(StateSpaceSystem, TimeVector, np.zeros(StateSpaceSystem.A.shape[0]))
+#
+#fig = plt.figure()
+#plt.plot(T, yout[:,0], label='height')
+#plt.plot(T, yout[:,1], label='velocity')
+#plt.legend()
+#plt.show()
+#
+
+plt.figure()
+plt.plot(Input[:,0,0].data.numpy())
+plt.show()
+
+
+
