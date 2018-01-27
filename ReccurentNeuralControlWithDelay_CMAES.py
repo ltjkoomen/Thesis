@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Dec 21 15:28:45 2017
+Created on Sun Dec 24 03:32:55 2017
 
 @author: Lenard
 """
 
-import autograd.numpy as np
+#import autograd.numpy as np
+import numpy as np
 from autograd import grad
 from autograd.misc.flatten import flatten
 from autograd.misc.optimizers import adam
 from matplotlib import pyplot as plt
 
+from pygmo import *
 
 
 #%%
@@ -133,24 +135,28 @@ def GetCost(y, yTarget, w):
     Cost = np.dot(np.square(Diff), w)
     return Cost
 
+class test_fit_bitch:
+    def fitness(self, NetParams):
+        NetParams = UnflattenParams(NetParams)
+        TotalCost = 0
+        Count = 0
+        for yTargetUse in yTarget:
+            for x0Use in x0:
+                _,DumTotalCost = SimulationFun(Sys, NetParams, x0Use, yTargetUse, T, ErrorW, Bounds)
+                TotalCost = TotalCost + DumTotalCost
+                Count = Count + 1
+        return np.array([TotalCost/Count])
+    
+    def get_bounds(self):
+        return ([-0.5 for k in range(ParamsInitialFlat.size)],[0.5 for k in range(ParamsInitialFlat.size)])
 
-def ObjectiveFunWrap(NetParams, k):
-    TotalCost = 0
-    Count = 0
-    for yTargetUse in yTarget:
-        for x0Use in x0:
-            _,DumTotalCost = SimulationFun(Sys, NetParams, x0Use, yTargetUse, T, ErrorW, Bounds)
-            TotalCost = TotalCost + DumTotalCost
-            Count = Count + 1
-    return TotalCost/Count
-
-def PrintPerf(Params, iter, _):
-    if iter == 0:
-        print("     Epoch     |    Train cost  ")
-    if iter%5 == 0:
-        Cost = ObjectiveFunWrap(Params, iter)
-        Gradient = flatten(ObjectiveGrad(Params, iter))
-        print(str(iter) + '  ' + str(np.round(Cost,6)) + '  ' + str(np.square(Gradient[0]).sum()))
+#def PrintPerf(Params, iter, _):
+#    if iter == 0:
+#        print("     Epoch     |    Train cost  ")
+#    if iter%5 == 0:
+#        Cost = ObjectiveFunWrap(Params, iter)
+#        Gradient = flatten(ObjectiveGrad(Params, iter))
+#        print(str(iter) + '  ' + str(np.round(Cost,6)) + '  ' + str(np.square(Gradient[0]).sum()))
 
 
 def GetZoomLimits(x, sparefactor):
@@ -196,17 +202,19 @@ def InitiateDelayedinputSystem(Sys, NumDelay):
 
 #%%
 # Number of neurons per layer
-LayerSizes = (4,30,1)
+LayerSizes = (4,50,1)
 
 # Randomly define a certain amount of starting states between certain bounds
 NumInitializationsX = 1
-InitializationBoundsX = ((10., 10.),(-0., 0.))
+InitializationBoundsX = ((10., 100.),(-0., 0.))
 
-x0 = tuple([(float(np.random.rand(1))*(InitializationBoundsX[0][1]-InitializationBoundsX[0][0]) + InitializationBoundsX[0][0], 
-             float(np.random.rand(1))*(InitializationBoundsX[1][1]-InitializationBoundsX[1][0]) + InitializationBoundsX[1][0]) for k in range(NumInitializationsX)])
+#x0 = tuple([(float(np.random.rand(1))*(InitializationBoundsX[0][1]-InitializationBoundsX[0][0]) + InitializationBoundsX[0][0], 
+#             float(np.random.rand(1))*(InitializationBoundsX[1][1]-InitializationBoundsX[1][0]) + InitializationBoundsX[1][0]) for k in range(NumInitializationsX)])
+
+x0 = tuple([(k,0.) for k in np.linspace(10, 100, 3)])
 
 # Define a certain number of target outputs
-yTarget = tuple([(k,) for k in np.linspace(-0.1, -0.33, 4)])
+yTarget = tuple([(k,) for k in np.linspace(-0.1, -0.33, 3)])
 
 # Error weighting
 ErrorW = (1.,)
@@ -216,7 +224,8 @@ Bounds = ((0.1, 1000),(-np.inf, np.inf))
 
 # Time parameters
 dt = 0.1
-T  = 100
+T  = 50
+
 
 # Initialize discrete state-space system (double integrator)
 A = np.array([[1., dt],[0., 1.]])
@@ -238,21 +247,26 @@ ParamsInitial = InitParams(LayerSizes)
 
 # Flatten parameter tuple
 ParamsInitialFlat, UnflattenParams = flatten(ParamsInitial)
-
+NetParams = ParamsInitialFlat
 # Get gradient of objective using autograd.
-ObjectiveGrad = grad(ObjectiveFunWrap,argnum=0)
-
-#%% Adam optimizer
-# The optimizers provided can optimize lists, tuples, or dicts of parameters.
-#ParamsOpt = adam(CostGrad, Params, step_size=StepSize, num_iters=NumEpochs, callback=PrintPerf)
-ParamsOpt = adam(ObjectiveGrad, ParamsInitial, callback=PrintPerf, num_iters=100,
-         step_size=0.005, b1=0.9, b2=0.99, eps=10**-8)
-
+#ObjectiveGrad = grad(ObjectiveFunWrap,argnum=0)
 
 #%%
 
+algo = algorithm(cmaes(gen = 50))
+algo.set_verbosity(2)
+prob = problem(test_fit_bitch())
+pop = population(prob, 30)
+pop = algo.evolve(pop) 
+
+uda = algo.extract(cmaes)
+uda.get_log() 
+
+#%%
+ParamsOpt = UnflattenParams(pop.champion_x)
+
 x0      = (10, 0.)
-yTarget = (-0.1,)
+yTarget = (-0.25,)
 T       = 200.
 
 # Increases extra room in the zoom of the plot
@@ -299,3 +313,7 @@ plt.ylabel('Divergence')
 plt.legend()
 plt.grid()
 plt.show()
+
+
+
+

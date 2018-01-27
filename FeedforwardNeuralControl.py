@@ -23,19 +23,19 @@ def FeedforwardNet(Params, x):
        params is a list of (weights, bias) tuples.
        inputs is an (N x D) matrix."""
        
-    for W,bias in Params[:-1]:       
-        x = np.dot(x, W) + bias
-        x = np.tanh(x)
+#    for W,bias in Params[:-1]:       
+#        x = np.dot(x, W) + bias
+#        x = np.tanh(x)
     
-    x = np.dot(x, Params[-1][0]) + Params[-1][1]
+    x = np.dot(x, Params[-1][0]) #+ Params[-1][1]
 
     return x
 
 def StateIterationFun(Sys, x, y, NeuralInput, yTarget, NetParams):
       
-    NeuralInput = np.concatenate((np.array([yTarget[0]-y[0], y[0]]), np.array([yTarget[0]-y[0], y[0]]) - NeuralInput[0:2]))
+#    NeuralInput = np.concatenate((np.array([yTarget[0]-y[0], y[0]]), np.array([yTarget[0]-y[0], y[0]]) - NeuralInput[0:2]))
     
-#    NeuralInput = np.array([yTarget[0]-y[0]])
+    NeuralInput = np.array([yTarget[0]-y[0]])
     
     # Obtain control signal from neural net
     ControlSignal = FeedforwardNet(NetParams,NeuralInput)
@@ -160,17 +160,17 @@ def InitiateDelayedinputSystem(Sys, NumDelay):
 
 #%% INITIALIZATION
 # Number of neurons per layer
-LayerSizes = (4,30,1)
+LayerSizes = (1,1,1)
 
 # Randomly define a certain amount of starting states between certain bounds
 NumInitializationsX = 1
-InitializationBoundsX = ((10., 10.),(-0., 0.))
+InitializationBoundsX = ((100., 100.),(-0.0, 0.))
 
 x0 = tuple([(float(np.random.rand(1))*(InitializationBoundsX[0][1]-InitializationBoundsX[0][0]) + InitializationBoundsX[0][0], 
              float(np.random.rand(1))*(InitializationBoundsX[1][1]-InitializationBoundsX[1][0]) + InitializationBoundsX[1][0]) for k in range(NumInitializationsX)])
 
 # Define a certain number of target outputs
-yTarget = tuple([(k,) for k in np.linspace(-0.1, -0.33, 3)])
+yTarget = tuple([(k,) for k in np.linspace(-0.1, -0.33, 1)])
 
 # Error weighting
 ErrorW = (1.,)
@@ -192,7 +192,7 @@ SysRaw = {'A':A, 'B':B, 'C':C, 'D':D, 'dt':dt, 'delay':0}
 
 # Define equivalent state-space system with delayed input
 # Number of samples delay
-NumDelay = 5
+NumDelay = 0
 # SS system
 Sys = InitiateDelayedinputSystem(SysRaw, NumDelay)
 
@@ -212,7 +212,7 @@ ObjectiveGrad = grad(ObjectiveFunWrap,argnum=0)
 # The optimizers provided can optimize lists, tuples, or dicts of parameters.
 #ParamsOpt = adam(CostGrad, Params, step_size=StepSize, num_iters=NumEpochs, callback=PrintPerf)
 ParamsOpt = adam(ObjectiveGrad, ParamsInitial, callback=PrintPerf, num_iters=100,
-         step_size=0.0005, b1=0.9, b2=0.99, eps=10**-8)
+         step_size=0.01, b1=0.9, b2=0.99, eps=10**-8)
 
 
 #%%
@@ -252,8 +252,9 @@ plt.show()
 
 plt.subplot(2,1,2)
 plt.plot(tPlot, divPlot, label='Divergence')
+plt.axhline(y=yTarget[0], label='Reference value', linestyle='--', color='black', linewidth=2)
 plt.xlim(GetZoomLimits(tPlot[0:IdxCollision+1], SpareRoomFactor))
-plt.ylim((-0.05, 0.05))
+#plt.ylim((-0.05, 0.05))
 #plt.xlim((0, 35))
 #plt.ylim((0, 35))
 #plt.ylim(GetZoomLimits(divPlot[0:IdxCollision+1-10], SpareRoomFactor))
